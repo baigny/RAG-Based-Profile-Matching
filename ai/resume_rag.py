@@ -21,10 +21,10 @@ def ingest_resume(filepath):
     meta = metadata_extractor.extract_metadata(resume_text)
     chunks = chunking.chunk_resume(resume_text)
 
-    to_upsert = []
-    for i, chunk in enumerate(chunks):
-        embedding = embeddings.embed_text(chunk["text"])
-        to_upsert.append({
+    chunk_embeddings = embeddings.embed_texts([c["text"] for c in chunks])
+
+    to_upsert = [
+        {
             "id": f"{filename}::{i}::{chunk['section']}",
             "text": chunk["text"],
             "embedding": embedding,
@@ -36,7 +36,9 @@ def ingest_resume(filepath):
                 "years_experience": meta["years_experience"],
                 "education": meta["education"],
             },
-        })
+        }
+        for i, (chunk, embedding) in enumerate(zip(chunks, chunk_embeddings))
+    ]
 
     vector_store.upsert_chunks(to_upsert)
     return len(to_upsert)
