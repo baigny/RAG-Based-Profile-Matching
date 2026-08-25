@@ -2,3 +2,5 @@ ollama
 chromadb
 pypdf
 python-docx
+python-pptx
+fpdf2
