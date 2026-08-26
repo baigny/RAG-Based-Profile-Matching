@@ -37,7 +37,7 @@ def test_experience_filtering(jd_path, min_years):
         ok = m["years_experience"] >= min_years
         all_passed = all_passed and ok
         tag = "OK" if ok else "FAIL"
-        print(f" - {tag}: {m['name']} ({m['source_file']}), years={m['years_experience']}, score={m['score']}")
+        print(f" - {tag}: {m['candidate_name']} ({m['resume_path']}), years={m['years_experience']}, score={m['match_score']}")
 
     print(f"Experience filtering check: {'PASS' if all_passed else 'FAIL'}\n")
     return all_passed
@@ -57,7 +57,7 @@ def test_keyword_coverage(jd_path, min_keyword_match=0.0):
         ok = m["keyword_match"] >= min_keyword_match
         all_passed = all_passed and ok
         tag = "OK" if ok else "FAIL"
-        print(f" - {tag}: {m['name']}, score={m['score']}, keyword_match={m['keyword_match']}, semantic={m['semantic_similarity']}")
+        print(f" - {tag}: {m['candidate_name']}, score={m['match_score']}, keyword_match={m['keyword_match']}, semantic={m['semantic_similarity']}")
 
     print(f"Keyword coverage check: {'PASS' if all_passed else 'FAIL'}\n")
     return all_passed

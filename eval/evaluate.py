@@ -5,8 +5,7 @@ and would add ~10 extra LLM calls per JD for no metric benefit.
 
 JDs are evaluated in parallel (thread pool) since each is an independent
 match() call - mostly waiting on local Ollama HTTP calls, so threads help
-despite the GIL. extract_keywords() also caches by JD text hash (see
-ai/job_matcher.py) so repeated eval runs skip the LLM call entirely."""
+despite the GIL."""
 import json
 import os
 import sys
@@ -43,7 +42,7 @@ def evaluate_jd(jd_filename, relevant):
     results = job_matcher.match(read_result["content"], top_n=K, include_reasoning=False)
     latency = time.perf_counter() - start
 
-    retrieved = [c["source_file"] for c in results]
+    retrieved = [os.path.basename(c["resume_path"]) for c in results]
     p_at_k = precision_at_k(retrieved, relevant_set, K)
 
     return {
