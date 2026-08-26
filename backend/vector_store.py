@@ -1,16 +1,21 @@
 """ChromaDB persistent client + collection helpers."""
+import threading
+
 import chromadb
 
 PERSIST_DIR = "chroma_db"
 COLLECTION_NAME = "resume_chunks"
 
 _client = None
+_client_lock = threading.Lock()
 
 
 def get_client():
     global _client
     if _client is None:
-        _client = chromadb.PersistentClient(path=PERSIST_DIR)
+        with _client_lock:
+            if _client is None:
+                _client = chromadb.PersistentClient(path=PERSIST_DIR)
     return _client
 
 
