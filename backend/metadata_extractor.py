@@ -1,7 +1,7 @@
 """Regex-based structured metadata (name, skills, years_experience, education) per resume - no LLM."""
 import re
 
-from backend.chunking import chunk_resume
+from backend.chunking import _strip_markdown_emphasis, chunk_resume
 
 MONTHS = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
@@ -99,7 +99,7 @@ GENERIC_LABEL_LINES = {"name", "resume", "profile", "candidate", "cv"}
 
 def _parse_name(resume_text):
     for line in resume_text.strip().splitlines():
-        line = line.strip()
+        line = _strip_markdown_emphasis(line.strip())
         if line and line.lower() not in GENERIC_LABEL_LINES:
             return line
     return "Unknown"
