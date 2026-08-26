@@ -1,92 +1,18 @@
-"""JD embed -> hybrid retrieval -> score -> LLM reasoning."""
+"""JD embed -> hybrid retrieval -> score -> reasoning (regex-based, no LLM)."""
 import argparse
-import hashlib
 import json
 import os
 import re
 import sys
-import threading
-
-import ollama
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from backend import embeddings, fs_tools, vector_store
 
-MODEL = "llama3.2:3b"
 RESUME_DIR = "data/resumes"
 CANDIDATE_POOL = 30  # chunks pulled from Chroma before aggregating per-resume
 TOP_N = 10
-KEYWORD_CACHE_PATH = "output/.keyword_cache.json"
-_keyword_cache_lock = threading.Lock()
-
-KEYWORD_PROMPT = """Extract the 5-10 most important must-have technical skills/tools/technologies from this job description.
-Each item must be a short atomic term as it would literally appear on a resume (e.g. "python", "django", "aws", "docker") -
-1-2 words max, NOT a descriptive phrase or sentence (do NOT write things like "python programming skills" or "strong problem-solving skills").
-Return ONLY a JSON array of lowercase strings, no preamble, no markdown fences.
-
-JOB DESCRIPTION:
-{jd_text}"""
-
-REASONING_PROMPT = """Job description:
-{jd_text}
-
-Candidate's matched resume excerpts:
-{chunks_text}
-
-In 1-2 sentences, explain why this candidate is a good match for the job (or note key gaps if relevant). Be specific and concise. Output only the explanation, no preamble."""
-
-
-def _strip_fences(text):
-    text = text.strip()
-    text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
-    text = re.sub(r"\n?```$", "", text)
-    return text.strip()
-
-
-def _load_keyword_cache():
-    if os.path.exists(KEYWORD_CACHE_PATH):
-        try:
-            with open(KEYWORD_CACHE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return {}
-    return {}
-
-
-def _save_keyword_cache(cache):
-    os.makedirs(os.path.dirname(KEYWORD_CACHE_PATH) or ".", exist_ok=True)
-    with open(KEYWORD_CACHE_PATH, "w", encoding="utf-8") as f:
-        json.dump(cache, f)
-
-
-def extract_keywords(jd_text):
-    cache_key = hashlib.sha256(jd_text.encode("utf-8")).hexdigest()
-
-    with _keyword_cache_lock:
-        cache = _load_keyword_cache()
-        if cache_key in cache:
-            return cache[cache_key]
-
-    prompt = KEYWORD_PROMPT.format(jd_text=jd_text)
-    response = ollama.generate(model=MODEL, prompt=prompt, format="json")
-    raw = _strip_fences(response["response"])
-    try:
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            for v in parsed.values():
-                if isinstance(v, list):
-                    parsed = v
-                    break
-        keywords = [str(k).lower().strip() for k in parsed if str(k).strip()]
-    except (json.JSONDecodeError, TypeError):
-        keywords = []
-
-    with _keyword_cache_lock:
-        cache = _load_keyword_cache()
-        cache[cache_key] = keywords
-        _save_keyword_cache(cache)
-    return keywords
+MIN_MUST_HAVE_MATCHES = 1  # candidates matching fewer JD skills than this are dropped
 
 
 def _normalize(text):
@@ -95,18 +21,38 @@ def _normalize(text):
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
-def keyword_score(resume_text, keywords):
-    if not keywords:
-        return 0.0
+def jd_must_have_skills(jd_text, candidate_skills):
+    """Must-have skills = the union of all retrieved candidates' own (already
+    extracted at ingest time by metadata_extractor) skills that literally
+    appear in the JD text - no LLM call needed to re-derive them here."""
+    normalized_jd = _normalize(jd_text)
+    all_skills = {skill for skills in candidate_skills for skill in skills}
+    return sorted(skill for skill in all_skills if _normalize(skill) in normalized_jd)
+
+
+def keyword_score(resume_skills, resume_text, must_have_skills):
+    if not must_have_skills:
+        return 0.0, []
     normalized_text = _normalize(resume_text)
-    hits = sum(1 for kw in keywords if _normalize(kw) in normalized_text)
-    return hits / len(keywords)
+    normalized_skills = {_normalize(s) for s in resume_skills}
+    matched = [
+        skill for skill in must_have_skills
+        if _normalize(skill) in normalized_skills or _normalize(skill) in normalized_text
+    ]
+    return len(matched) / len(must_have_skills), matched
 
 
-def generate_reasoning(jd_text, chunks_text):
-    prompt = REASONING_PROMPT.format(jd_text=jd_text, chunks_text=chunks_text)
-    response = ollama.generate(model=MODEL, prompt=prompt)
-    return response["response"].strip()
+def generate_reasoning(matched_skills, must_have_skills, years_experience, sections):
+    """Template-based reasoning referencing matched skills and resume sections."""
+    if matched_skills:
+        skill_part = f"Matches {len(matched_skills)}/{len(must_have_skills)} required skills ({', '.join(matched_skills)})"
+    else:
+        skill_part = "No required skills matched directly, ranked on semantic similarity alone"
+
+    section_part = f", supported by the {', '.join(sections)} section(s)" if sections else ""
+    experience_part = f". Candidate has {years_experience} years of experience." if years_experience else "."
+
+    return f"{skill_part}{section_part}{experience_part}"
 
 
 def match(jd_text, top_n=TOP_N, min_years=None, semantic_weight=0.6, keyword_weight=0.4, include_reasoning=True):
@@ -124,41 +70,54 @@ def match(jd_text, top_n=TOP_N, min_years=None, semantic_weight=0.6, keyword_wei
         source = meta["source_file"]
         if source not in per_resume or dist < per_resume[source]["best_distance"]:
             per_resume[source] = {"best_distance": dist, "meta": meta}
-        per_resume[source].setdefault("chunks", []).append(doc)
+        per_resume[source].setdefault("chunks", []).append({
+            "section": meta.get("section", "resume"),
+            "text": doc,
+        })
 
-    keywords = extract_keywords(jd_text)
+    resume_skills = {
+        source: [s.strip() for s in info["meta"].get("skills", "").split(",") if s.strip()]
+        for source, info in per_resume.items()
+    }
+    must_have = jd_must_have_skills(jd_text, resume_skills.values())
 
     candidates = []
     for source, info in per_resume.items():
         meta = info["meta"]
-        resume_path = os.path.join(RESUME_DIR, source)
-        read_result = fs_tools.read_file(resume_path)
-        resume_text = read_result["content"] if read_result["success"] else "\n".join(info["chunks"])
+        resume_file_path = os.path.join(RESUME_DIR, source)
+        read_result = fs_tools.read_file(resume_file_path)
+        resume_text = read_result["content"] if read_result["success"] else "\n".join(c["text"] for c in info["chunks"])
 
-        # distance -> similarity (nomic-embed-text uses cosine distance in [0, 2])
+        # distance -> similarity (Chroma cosine distance is in [0, 2])
         semantic_sim = max(0.0, 1 - info["best_distance"] / 2)
-        kw_score = keyword_score(resume_text, keywords)
+        kw_score, matched_skills = keyword_score(resume_skills[source], resume_text, must_have)
+
+        # hard must-have filter: drop candidates matching too few required skills
+        if must_have and len(matched_skills) < MIN_MUST_HAVE_MATCHES:
+            continue
+
         final_score = round((semantic_weight * semantic_sim + keyword_weight * kw_score) * 100, 1)
 
         candidates.append({
-            "source_file": source,
-            "name": meta.get("name", "Unknown"),
+            "candidate_name": meta.get("name", "Unknown"),
+            "resume_path": resume_file_path.replace("\\", "/"),
+            "match_score": final_score,
             "years_experience": meta.get("years_experience", 0),
             "education": meta.get("education", "Unknown"),
-            "skills": meta.get("skills", ""),
-            "score": final_score,
             "semantic_similarity": round(semantic_sim, 3),
             "keyword_match": round(kw_score, 3),
+            "matched_skills": matched_skills,
+            "relevant_excerpts": [f"[{c['section']}] {c['text'].strip()[:300]}" for c in info["chunks"][:3]],
             "matched_chunks": info["chunks"],
         })
 
-    candidates.sort(key=lambda c: c["score"], reverse=True)
+    candidates.sort(key=lambda c: c["match_score"], reverse=True)
     top_candidates = candidates[:top_n]
 
     for c in top_candidates:
         if include_reasoning:
-            chunks_text = "\n---\n".join(c["matched_chunks"][:3])
-            c["reasoning"] = generate_reasoning(jd_text, chunks_text)
+            sections = sorted({ch["section"] for ch in c["matched_chunks"][:3]})
+            c["reasoning"] = generate_reasoning(c["matched_skills"], must_have, c["years_experience"], sections)
         del c["matched_chunks"]
 
     return top_candidates
@@ -186,9 +145,9 @@ def main():
 
     print(f"\nTop {len(results)} matches for {args.jd_path}:\n")
     for i, c in enumerate(results, start=1):
-        print(f"{i}. {c['name']} ({c['source_file']}) — score {c['score']}/100")
+        print(f"{i}. {c['candidate_name']} ({c['resume_path']}) — score {c['match_score']}/100")
         print(f"   years: {c['years_experience']}, education: {c['education']}")
-        print(f"   semantic: {c['semantic_similarity']}, keyword: {c['keyword_match']}")
+        print(f"   semantic: {c['semantic_similarity']}, keyword: {c['keyword_match']}, matched skills: {c['matched_skills']}")
         print(f"   reasoning: {c['reasoning']}")
         print()
 
