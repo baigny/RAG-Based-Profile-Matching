@@ -1,9 +1,11 @@
 """JD embed -> hybrid retrieval -> score -> LLM reasoning."""
 import argparse
+import hashlib
 import json
 import os
 import re
 import sys
+import threading
 
 import ollama
 
@@ -11,10 +13,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from backend import embeddings, fs_tools, vector_store
 
-MODEL = "llama3.1"
+MODEL = "llama3.2:3b"
 RESUME_DIR = "data/resumes"
 CANDIDATE_POOL = 30  # chunks pulled from Chroma before aggregating per-resume
 TOP_N = 10
+KEYWORD_CACHE_PATH = "output/.keyword_cache.json"
+_keyword_cache_lock = threading.Lock()
 
 KEYWORD_PROMPT = """Extract the 5-10 most important must-have technical skills/tools/technologies from this job description.
 Each item must be a short atomic term as it would literally appear on a resume (e.g. "python", "django", "aws", "docker") -
@@ -40,7 +44,30 @@ def _strip_fences(text):
     return text.strip()
 
 
+def _load_keyword_cache():
+    if os.path.exists(KEYWORD_CACHE_PATH):
+        try:
+            with open(KEYWORD_CACHE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def _save_keyword_cache(cache):
+    os.makedirs(os.path.dirname(KEYWORD_CACHE_PATH) or ".", exist_ok=True)
+    with open(KEYWORD_CACHE_PATH, "w", encoding="utf-8") as f:
+        json.dump(cache, f)
+
+
 def extract_keywords(jd_text):
+    cache_key = hashlib.sha256(jd_text.encode("utf-8")).hexdigest()
+
+    with _keyword_cache_lock:
+        cache = _load_keyword_cache()
+        if cache_key in cache:
+            return cache[cache_key]
+
     prompt = KEYWORD_PROMPT.format(jd_text=jd_text)
     response = ollama.generate(model=MODEL, prompt=prompt, format="json")
     raw = _strip_fences(response["response"])
@@ -51,9 +78,15 @@ def extract_keywords(jd_text):
                 if isinstance(v, list):
                     parsed = v
                     break
-        return [str(k).lower().strip() for k in parsed if str(k).strip()]
+        keywords = [str(k).lower().strip() for k in parsed if str(k).strip()]
     except (json.JSONDecodeError, TypeError):
-        return []
+        keywords = []
+
+    with _keyword_cache_lock:
+        cache = _load_keyword_cache()
+        cache[cache_key] = keywords
+        _save_keyword_cache(cache)
+    return keywords
 
 
 def _normalize(text):

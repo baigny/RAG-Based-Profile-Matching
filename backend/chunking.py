@@ -4,7 +4,7 @@ import re
 
 import ollama
 
-MODEL = "llama3.1"
+MODEL = "llama3.2:3b"
 
 CHUNK_PROMPT = """Split the following resume into its sections (e.g. Summary, Skills, Experience, Education, Certifications, Projects).
 Return ONLY a JSON array, no preamble, no markdown fences. Each element must be an object:

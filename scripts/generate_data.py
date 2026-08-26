@@ -8,7 +8,7 @@ import ollama
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from backend import fs_tools
 
-MODEL = "llama3.1"
+MODEL = "llama3.2:3b"
 RESUME_DIR = "data/resumes"
 JD_DIR = "data/job_descriptions"
 

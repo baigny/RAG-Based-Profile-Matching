@@ -1,7 +1,11 @@
 {
   "jd_01_senior_backend_engineer.txt": [
     "resume_02_backend_engineer.txt",
+    "resume_04_devops_engineer.txt",
+    "resume_10_cloud_architect.docx",
+    "resume_13_backend_developer.docx",
     "resume_21_api_engineer.pdf",
+    "resume_28_platform_engineer.pptx",
     "resume_32_solutions_architect.pptx"
   ],
   "jd_02_frontend_developer.txt": [
@@ -12,21 +16,32 @@
   ],
   "jd_03_data_scientist.txt": [
     "resume_03_data_scientist.txt",
+    "resume_08_machine_learning_engineer.txt",
+    "resume_09_data_analyst.docx",
     "resume_19_applied_data_scientist.pdf",
+    "resume_23_ml_ops_engineer.pdf",
     "resume_24_research_scientist.pdf"
   ],
   "jd_04_devops_engineer.txt": [
     "resume_04_devops_engineer.txt",
+    "resume_10_cloud_architect.docx",
     "resume_12_site_reliability_engineer.docx",
+    "resume_17_systems_administrator.pdf",
+    "resume_22_cloud_support_engineer.pdf",
     "resume_26_release_engineer.pptx"
   ],
   "jd_05_machine_learning_engineer.txt": [
+    "resume_03_data_scientist.txt",
     "resume_08_machine_learning_engineer.txt",
+    "resume_19_applied_data_scientist.pdf",
     "resume_23_ml_ops_engineer.pdf",
     "resume_24_research_scientist.pdf"
   ],
   "jd_06_full_stack_developer.txt": [
+    "resume_01_frontend_developer.txt",
     "resume_06_full_stack_developer.txt",
-    "resume_13_backend_developer.docx"
+    "resume_13_backend_developer.docx",
+    "resume_20_ui_engineer.pdf",
+    "resume_25_web_developer.pptx"
   ]
 }

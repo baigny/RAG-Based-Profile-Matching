@@ -4,7 +4,7 @@ import re
 
 import ollama
 
-MODEL = "llama3.1"
+MODEL = "llama3.2:3b"
 
 EXTRACT_PROMPT = """Extract structured metadata from the resume below.
 Return ONLY a JSON object, no preamble, no markdown fences, with exactly these keys:
