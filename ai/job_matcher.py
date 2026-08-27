@@ -140,7 +140,7 @@ def main():
     results = match(jd_text, top_n=args.top, min_years=args.min_years)
 
     if args.json:
-        print(json.dumps({"jd_path": args.jd_path, "top_matches": results}, indent=2))
+        print(json.dumps({"job_description": jd_text, "top_matches": results}, indent=2))
         return
 
     print(f"\nTop {len(results)} matches for {args.jd_path}:\n")
