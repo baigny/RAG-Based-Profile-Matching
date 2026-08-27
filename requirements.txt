@@ -7,3 +7,4 @@ python-pptx
 fpdf2
 ipykernel
 matplotlib
+notebook
