@@ -5,3 +5,5 @@ pypdf
 python-docx
 python-pptx
 fpdf2
+ipykernel
+matplotlib
