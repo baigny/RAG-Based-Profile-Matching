@@ -1,6 +1,6 @@
 # RAG-Based Profile Matching
 
-A local, zero-cost RAG pipeline that matches resumes against job descriptions. Resumes are chunked by section, embedded, and stored in a vector DB; a job description is matched via hybrid (semantic + keyword) search, scored 0-100, and given an LLM-generated reasoning per match. Everything runs on **Ollama** (local, no API key) and **ChromaDB** (local persistent vector store).
+A local, zero-cost RAG pipeline that matches resumes against job descriptions. Resumes are chunked by section, embedded, and stored in a vector DB; a job description is matched via hybrid (semantic + keyword) search, scored 0-100, and given a template-based reasoning per match. Everything runs on **Ollama** (local, no API key) and **ChromaDB** (local persistent vector store).
 
 ## Project structure
 
@@ -14,15 +14,17 @@ RAG-Based-Profile-Matching/
 │   └── metadata_extractor.py # LLM call -> structured JSON metadata per resume
 ├── ai/
 │   ├── resume_rag.py         # ingestion pipeline: fs_tools -> chunk -> embed -> store
-│   └── job_matcher.py        # JD embed -> hybrid retrieval -> score -> LLM reasoning
+│   └── job_matcher.py        # JD embed -> hybrid retrieval -> score -> template reasoning
 ├── data/
 │   ├── resumes/               # synthetic resumes (.txt)
 │   └── job_descriptions/      # synthetic job descriptions (.txt)
 ├── scripts/
-│   └── generate_data.py      # LLM-generates synthetic resumes + JDs
+│   ├── generate_data.py      # LLM-generates synthetic resumes + JDs
+│   └── build_notebook.py     # builds + executes notebook.ipynb from source cells
 ├── eval/
 │   ├── ground_truth.json     # manually labeled resume<->JD matches
 │   └── evaluate.py           # precision@10 + latency per query
+├── notebook.ipynb            # experimentation and analysis notebook
 ├── chroma_db/                # persisted vector store (gitignored)
 ├── output/                   # scratch output
 └── requirements.txt
@@ -90,9 +92,9 @@ Optional flags: `--top N` (default 10), `--min-years N` (metadata filter applied
 
 Pipeline:
 1. Embed the JD, query Chroma for the top candidate chunks, aggregate to one best-matching chunk set per resume.
-2. LLM extracts must-have keywords from the JD; keyword coverage is measured against each candidate's full resume text.
+2. Must-have skills are derived by intersecting each retrieved candidate's already-extracted metadata skills with the JD text (no LLM call); keyword coverage is then measured against each candidate's full resume text.
 3. Final score = `0.6 * semantic_similarity + 0.4 * keyword_match`, scaled to 0-100.
-4. LLM generates a 1-2 sentence reasoning per top match, grounded in the actual matched excerpts.
+4. A template-based reasoning sentence is generated per top match, referencing matched skills and resume sections (no LLM call).
 
 ### 4. Run evaluation
 
@@ -106,22 +108,30 @@ Results (32 resumes, 6 JDs, local CPU inference):
 
 | JD | P@10 | Latency (s) |
 |---|---|---|
-| jd_01_senior_backend_engineer | 0.3 | 39.2 |
-| jd_02_frontend_developer | 0.4 | 27.1 |
-| jd_03_data_scientist | 0.3 | 44.0 |
-| jd_04_devops_engineer | 0.3 | 68.7 |
-| jd_05_machine_learning_engineer | 0.2 | 23.3 |
-| jd_06_full_stack_developer | 0.2 | 35.8 |
+| jd_01_senior_backend_engineer | 0.6 | 3.02 |
+| jd_02_frontend_developer | 0.4 | 3.02 |
+| jd_03_data_scientist | 0.5 | 2.89 |
+| jd_04_devops_engineer | 0.5 | 2.82 |
+| jd_05_machine_learning_engineer | 0.3 | 3.00 |
+| jd_06_full_stack_developer | 0.3 | 3.00 |
 
-Average precision@10: **0.283**, average latency: **39.7s**.
+Average precision@10: **0.433**, average latency: **2.96s**.
 
-P@10 is capped low by design — ground truth lists only 2-4 relevant resumes per JD out of 32 candidates (e.g. `jd_06` has 2 relevant → 0.2 is the ceiling, and it hit exactly that, meaning both relevant resumes landed in the top 10). Latency is dominated by a single LLM keyword-extraction call per query on CPU; `eval/evaluate.py` runs with `include_reasoning=False` since reasoning text isn't part of either metric.
+P@10 is capped by ground truth density — `eval/ground_truth.json` lists only 4-7 relevant resumes per JD out of 32 candidates, so a perfect retrieval still tops out below 1.0 for most JDs. Neither the keyword extraction nor the reasoning step calls an LLM (both are regex/template-based against already-extracted metadata), so per-query latency is now dominated by the embedding call alone; `eval/evaluate.py` still runs with `include_reasoning=False` to isolate retrieval/scoring cost.
 
 Also run `eval/verify_matching.py` for quick sanity checks (experience filtering, keyword coverage) — both pass.
 
+### 5. Experimentation notebook
+
+```bash
+venv\Scripts\jupyter.exe notebook notebook.ipynb
+```
+
+Opens `notebook.ipynb` in the browser: single-query walkthrough, hybrid semantic/keyword weight sensitivity, `--min-years` filter comparison, and the full precision@10/latency evaluation with charts. Rebuild it (with fresh executed outputs) via `venv\Scripts\python.exe scripts\build_notebook.py`.
+
 ## Notes
 
-- All LLM calls (chunking, metadata extraction, keyword extraction, reasoning) use `llama3.1` locally via `ollama.generate(..., format="json")` for structured outputs, with a regex-based fallback in `chunking.py` if the model returns malformed JSON.
+- Chunking and metadata extraction use `llama3.1` locally via `ollama.generate(..., format="json")` for structured outputs, with a regex-based fallback in `chunking.py` if the model returns malformed JSON. `job_matcher.py`'s must-have-skill extraction and match reasoning are regex/template-based, not LLM calls.
 - `backend/fs_tools.py` is reused unmodified from the `LLM-Powered-File-System-Assistant` project — no PDF/DOCX parsing was reimplemented. Extended in this project with `.pptx` read support and `.docx`/`.pdf`/`.pptx` writers, to give the synthetic dataset real format diversity (8 resumes each of `.txt`/`.docx`/`.pdf`/`.pptx`).
 - Ground truth in `eval/ground_truth.json` is manually labeled by role/skill relevance against the fixed synthetic dataset generated by `scripts/generate_data.py`.
 - ChromaDB's HNSW index metric (cosine vs. L2) is fixed at collection creation — `vector_store.py` explicitly requests cosine space since `job_matcher.py`'s similarity math assumes cosine distance in `[0, 2]`.
