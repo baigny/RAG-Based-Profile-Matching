@@ -138,4 +138,4 @@ Opens `notebook.ipynb` in the browser: single-query walkthrough, hybrid semantic
 
 ## Demo video
 
-_TODO: add link after recording._
+[Watch the demo](https://drive.google.com/file/d/1BRw5_OP1JglJEA-n6CigTQ3VAtJr6WZH/view?usp=drive_link)
